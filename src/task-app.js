@@ -1,8 +1,8 @@
 import { html, css } from 'lit';
-import { createTodo, fetchTodos } from './api/todos.js';
+import { createTodo, fetchTodos, updateTodo } from './api/todos.js';
 
 import Base from './Base.js';
-import { getTodos, setTodo, setTodos } from './idb.js';
+import { getTodos, getTodoToCreate, getTodoToUpdate, setTodo, setTodos } from './idb.js';
 import checkConnectivity from './network.js';
 
 class TaskApp extends Base {
@@ -38,6 +38,9 @@ class TaskApp extends Base {
     checkConnectivity();
     document.addEventListener('connection-changed', ({ detail: isOnline }) => {
       this.isOnline = isOnline;
+      if (this.isOnline) {
+        this.syncData();
+      }
     });
 
     if (this.isOnline && navigator.onLine) {
@@ -46,6 +49,38 @@ class TaskApp extends Base {
     } else {
       this.todos = await getTodos() || [];
     }
+  }
+
+  async syncData() {
+    // Create
+    const toCreate = await getTodoToCreate();
+    if (toCreate.length) {
+      for (let todo of toCreate) {
+        todo.synced = 1;
+        const result = await createTodo(todo);
+        if (result === false) {
+          todo.synced = 1;
+        }
+        await setTodo(todo);
+      }
+    }
+
+    // Update
+    const toUpdate = await getTodoToUpdate();
+    if (toUpdate.length) {
+      for (let todo of toUpdate) {
+        todo.synced = 1;
+        todo.updated = 0;
+        const result = await updateTodo(todo);
+        if (result === false) {
+          todo.synced = 0;
+          todo.updated = 1;
+        }
+        await setTodo(todo);
+      }
+    }
+
+    this.todos = await getTodos();
   }
 
   async handleCreate({ detail: todo }) {
@@ -58,6 +93,22 @@ class TaskApp extends Base {
     this.todos = await setTodo(todo);
   }
 
+  async handleUpdate({ detail: todo }) {
+    await setTodo(todo);
+    if (this.isOnline && navigator.onLine) {
+      const result = await updateTodo(todo);
+      if (result !== false) {
+        return this.todos = await getTodos();
+      }
+    }
+    if (todo.synced === 1) todo.updated = 1;
+    return this.todos = await setTodo(todo);
+  }
+
+  async handleDelete({ detail: todo }) {
+
+  }
+
   render() {
     return html`
       <section class="relative">
@@ -67,6 +118,8 @@ class TaskApp extends Base {
         <main>
           <task-list
             .todos="${this.todos}"
+            @update-todo="${this.handleUpdate}"
+            @delete-todo="${this.handleDelete}"
             @create-todo="${this.handleCreate}"
           ></task-list>
         </main>
